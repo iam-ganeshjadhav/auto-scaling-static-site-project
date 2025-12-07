@@ -1,30 +1,18 @@
-node {
+stage('Find EC2 Instances in ASG') {
+    withCredentials([
+        [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
+    ]) {
+        INSTANCES = sh(
+            script: """
+                aws autoscaling describe-auto-scaling-groups \
+                --auto-scaling-group-names auto-scaling-static-site-asg \
+                --query "AutoScalingGroups[0].Instances[*].InstanceId" \
+                --output text \
+                --region ap-south-1
+            """,
+            returnStdout: true
+        ).trim()
 
-    stage('Checkout') {
-        git branch: 'main', url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
-    }
-
-    stage('Find EC2 Instances in ASG') {
-        withAWS(credentials: 'awscreds', region: 'ap-south-1') {
-            INSTANCES = sh(
-                script: """
-                    aws autoscaling describe-auto-scaling-groups \
-                    --auto-scaling-group-names auto-scaling-static-site-asg \
-                    --query "AutoScalingGroups[0].Instances[*].InstanceId" \
-                    --output text
-                """,
-                returnStdout: true
-            ).trim()
-
-            echo "Instances found: ${INSTANCES}"
-        }
-    }
-
-    stage('Deploy Website to EC2 Instances') {
-        echo "Deploy code here…"
-    }
-
-    stage('Validate Behind ALB') {
-        echo "Validate ALB here…"
+        echo "Instances found: ${INSTANCES}"
     }
 }
