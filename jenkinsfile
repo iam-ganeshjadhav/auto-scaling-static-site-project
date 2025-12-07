@@ -1,0 +1,79 @@
+pipeline {
+  agent any
+
+  environment {
+    AWS_REGION = "ap-south-1"
+    TF_IN_AUTOMATION = "true"
+  }
+
+  triggers {
+    githubPush()
+  }
+
+  stages {
+    stage("Checkout Infra Code") {
+      steps {
+        git branch: 'main', url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
+      }
+    }
+
+    stage("Terraform Init") {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws-creds', passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
+          sh '''
+            export AWS_REGION=${AWS_REGION}
+            terraform init
+          '''
+        }
+      }
+    }
+
+    stage("Terraform Plan") {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws-creds', passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
+          sh '''
+            export AWS_REGION=${AWS_REGION}
+            terraform plan \
+              -var="alert_email=your-email@example.com" \
+              -var="app_version=${BUILD_NUMBER}"
+          '''
+        }
+      }
+    }
+
+    stage("Terraform Apply") {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws-creds', passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
+          sh '''
+            export AWS_REGION=${AWS_REGION}
+            terraform apply -auto-approve \
+              -var="alert_email=your-email@example.com" \
+              -var="app_version=${BUILD_NUMBER}"
+          '''
+        }
+      }
+    }
+
+    stage("Validate Website Behind ALB") {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws-creds', passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
+          sh '''
+            export AWS_REGION=${AWS_REGION}
+            ALB_DNS=$(terraform output -raw alb_dns_name)
+            echo "ALB DNS: $ALB_DNS"
+            curl -I http://$ALB_DNS
+          '''
+        }
+      }
+    }
+
+    stage("Trigger CPU Load Test Placeholder") {
+      steps {
+        sh '''
+          echo "CPU load test can be triggered on one of the EC2 instances to show scaling."
+          echo "Use stress tool via SSH or SSM as part of demo."
+        '''
+      }
+    }
+  }
+}
