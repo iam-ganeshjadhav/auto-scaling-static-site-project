@@ -1,46 +1,88 @@
-stage('Deploy Website to EC2 Instances') {
+node {
 
-    withCredentials([
-        [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
-    ]) {
+    def INSTANCES = ""
 
-        script {
+    // -------------------------------
+    // 1. CHECKOUT
+    // -------------------------------
+    stage('Checkout') {
+        git branch: 'main', url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
+    }
 
-            if (!INSTANCES?.trim()) {
-                error "No EC2 instances found in ASG!"
-            }
+    // -------------------------------
+    // 2. FIND EC2 INSTANCES
+    // -------------------------------
+    stage('Find EC2 Instances in ASG') {
 
-            def instanceList = INSTANCES.split()
+        withCredentials([
+            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
+        ]) {
 
-            instanceList.each { instanceId ->
-
-                echo "Deploying to: ${instanceId}"
-
-                def PUBLIC_IP = sh(
+            script {
+                INSTANCES = sh(
                     script: """
-                        aws ec2 describe-instances \
-                        --instance-ids ${instanceId} \
-                        --query "Reservations[0].Instances[0].PublicIpAddress" \
+                        aws autoscaling describe-auto-scaling-groups \
+                        --auto-scaling-group-names auto-scaling-static-site-asg \
+                        --query "AutoScalingGroups[0].Instances[*].InstanceId" \
                         --output text \
                         --region ap-south-1
                     """,
                     returnStdout: true
                 ).trim()
 
-                echo "Public IP: ${PUBLIC_IP}"
-
-                if (!PUBLIC_IP || PUBLIC_IP == "None") {
-                    echo "Skipping ${instanceId} — No public IP."
-                    return
-                }
-
-                // Upload entire website folder (RECOMMENDED)
-                sh """
-                    scp -o StrictHostKeyChecking=no -i /var/lib/jenkins/keys/mykey.pem -r website/* ec2-user@${PUBLIC_IP}:/var/www/html/
-                """
-
-                echo "Deployment completed for ${instanceId}"
+                echo "ASG Instances Found: ${INSTANCES}"
             }
         }
     }
+
+    // -------------------------------
+    // 3. DEPLOY TO EC2 INSTANCE
+    // -------------------------------
+    stage('Deploy Website to EC2 Instances') {
+
+        withCredentials([
+            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
+        ]) {
+
+            script {
+
+                if (!INSTANCES?.trim()) {
+                    error "ERROR: No EC2 instances found in ASG!"
+                }
+
+                def instanceList = INSTANCES.split()
+
+                instanceList.each { instanceId ->
+
+                    echo "Deploying to: ${instanceId}"
+
+                    def PUBLIC_IP = sh(
+                        script: """
+                            aws ec2 describe-instances \
+                            --instance-ids ${instanceId} \
+                            --query "Reservations[0].Instances[0].PublicIpAddress" \
+                            --output text \
+                            --region ap-south-1
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    echo "Public IP: ${PUBLIC_IP}"
+
+                    if (!PUBLIC_IP || PUBLIC_IP == "None") {
+                        echo "Skipping ${instanceId} — No public IP."
+                        return
+                    }
+
+                    // Upload entire website folder
+                    sh """
+                        scp -o StrictHostKeyChecking=no -i /var/lib/jenkins/keys/mykey.pem -r website/* ec2-user@${PUBLIC_IP}:/var/www/html/
+                    """
+
+                    echo "Deployment completed for ${instanceId}"
+                }
+            }
+        }
+    }
+
 }
