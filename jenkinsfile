@@ -2,103 +2,66 @@ pipeline {
     agent any
 
     environment {
-        TF_VERSION = "1.7.0"
         AWS_REGION = "ap-south-1"
+        REPO_URL = "https://github.com/your-github/static-website-project.git"
+        ASG_NAME = "auto-scaling-static-site-asg"
+    }
+
+    triggers {
+        githubPush()
     }
 
     stages {
 
-        /* -----------------------------
-           CHECKOUT APPLICATION WEBSITE CODE
-        ------------------------------ */
-        stage('Checkout SCM') {
+        stage("Checkout Website Code") {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
+                git branch: 'main', url: "${REPO_URL}"
             }
         }
 
-        /* -----------------------------
-           CHECKOUT TERRAFORM INFRA CODE
-        ------------------------------ */
-        stage('Checkout Infra Code') {
+        stage("Find EC2 Instances in ASG") {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
+                sh '''
+                INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+                    --auto-scaling-group-names $ASG_NAME \
+                    --query "AutoScalingGroups[0].Instances[*].InstanceId" \
+                    --output text)
+
+                echo $INSTANCES > instances.txt
+                '''
             }
         }
 
-        /* -----------------------------
-           TERRAFORM INIT
-        ------------------------------ */
-        stage('Terraform Init') {
+        stage("Deploy Website to EC2 Instances") {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-creds'
-                ]]) {
+                withCredentials([sshUserPrivateKey(credentialsId: 'node-key', keyFileVariable: 'KEY')]) {
                     sh '''
-                        echo "Running Terraform Init..."
-                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                    for ID in $(cat instances.txt); do
+                        IP=$(aws ec2 describe-instances \
+                            --instance-ids $ID \
+                            --query "Reservations[0].Instances[0].PublicIpAddress" \
+                            --output text)
 
-                        terraform init
+                        rsync -avz -e "ssh -o StrictHostKeyChecking=no -i $KEY" ./ \
+                            ec2-user@$IP:/usr/share/nginx/html/
+
+                        ssh -o StrictHostKeyChecking=no -i $KEY ec2-user@$IP "sudo systemctl restart nginx"
+                    done
                     '''
                 }
             }
         }
 
-        /* -----------------------------
-           TERRAFORM PLAN
-        ------------------------------ */
-        stage('Terraform Plan') {
+        stage("Validate Behind ALB") {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-creds'
-                ]]) {
-                    sh '''
-                        echo "Running Terraform Plan..."
-                        terraform plan
-                    '''
-                }
-            }
-        }
+                sh '''
+                ALB_DNS=$(aws elbv2 describe-load-balancers \
+                    --names auto-scaling-static-site-alb \
+                    --query "LoadBalancers[0].DNSName" \
+                    --output text)
 
-        /* -----------------------------
-           TERRAFORM APPLY
-        ------------------------------ */
-        stage('Terraform Apply') {
-            steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-creds'
-                ]]) {
-                    sh '''
-                        echo "Running Terraform Apply..."
-                        terraform apply -auto-approve
-                    '''
-                }
-            }
-        }
-
-        /* -----------------------------
-           VALIDATE WEBSITE BEHIND ALB
-        ------------------------------ */
-        stage('Validate Website Behind ALB') {
-            steps {
-                script {
-                    echo "Validation placeholder – You can add ALB DNS test here."
-                }
-            }
-        }
-
-        /* -----------------------------
-           LOAD TEST PLACEHOLDER
-        ------------------------------ */
-        stage('Trigger CPU Load Test Placeholder') {
-            steps {
-                echo "CPU Load test placeholder"
+                curl -I http://$ALB_DNS
+                '''
             }
         }
     }
