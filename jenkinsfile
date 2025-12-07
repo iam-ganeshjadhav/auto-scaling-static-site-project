@@ -1,44 +1,46 @@
-stage('Deploy Website to EC2 Instances') {
+node {
 
-    withCredentials([
-        [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
-    ]) {
+    def INSTANCES = ""     // ← FIXED HERE
 
-        script {
-            if (!INSTANCES?.trim()) {
-                error "No EC2 instances found in ASG!"
-            }
-
-            def instanceList = INSTANCES.split()
-
-            instanceList.each { instanceId ->
-
-                echo "Deploying to instance: ${instanceId}"
-
-                def PUBLIC_IP = sh(
+    stage('Find EC2 Instances in ASG') {
+        withCredentials([
+            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
+        ]) {
+            script {
+                INSTANCES = sh(
                     script: """
-                        aws ec2 describe-instances \
-                        --instance-ids ${instanceId} \
-                        --query "Reservations[0].Instances[0].PublicIpAddress" \
+                        aws autoscaling describe-auto-scaling-groups \
+                        --auto-scaling-group-names auto-scaling-static-site-asg \
+                        --query "AutoScalingGroups[0].Instances[*].InstanceId" \
                         --output text \
                         --region ap-south-1
                     """,
                     returnStdout: true
                 ).trim()
 
-                echo "Instance Public IP: ${PUBLIC_IP}"
-
-                if (!PUBLIC_IP || PUBLIC_IP == "None") {
-                    echo "Skipping instance ${instanceId} (no public IP)"
-                    return
-                }
-
-                sh """
-                    scp -o StrictHostKeyChecking=no -i /var/lib/jenkins/keys/mykey.pem index.html ec2-user@${PUBLIC_IP}:/var/www/html/
-                """
-
-                echo "Deployment complete for instance: ${instanceId}"
+                echo "ASG Instances: ${INSTANCES}"
             }
         }
     }
+
+    stage('Deploy Website to EC2 Instances') {
+        withCredentials([
+            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
+        ]) {
+            script {
+
+                if (!INSTANCES?.trim()) {
+                    error "No EC2 instances found!"
+                }
+
+                def instanceList = INSTANCES.split()
+
+                instanceList.each { instanceId ->
+                    echo "Deploying to instance: ${instanceId}"
+                }
+
+            }
+        }
+    }
+
 }
