@@ -1,131 +1,46 @@
-node {
+stage('Deploy Website to EC2 Instances') {
 
-    // GLOBAL VARIABLE (to be used in all stages)
-    def INSTANCES = ""
+    withCredentials([
+        [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
+    ]) {
 
-    // -----------------------------------------
-    // 1. CHECKOUT CODE
-    // -----------------------------------------
-    stage('Checkout') {
-        git branch: 'main', url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
-    }
+        script {
 
-    // -----------------------------------------
-    // 2. FETCH EC2 INSTANCE IDs FROM ASG
-    // -----------------------------------------
-    stage('Find EC2 Instances in ASG') {
+            if (!INSTANCES?.trim()) {
+                error "No EC2 instances found in ASG!"
+            }
 
-        withCredentials([
-            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
-        ]) {
+            def instanceList = INSTANCES.split()
 
-            script {
-                INSTANCES = sh(
+            instanceList.each { instanceId ->
+
+                echo "Deploying to: ${instanceId}"
+
+                def PUBLIC_IP = sh(
                     script: """
-                        aws autoscaling describe-auto-scaling-groups \
-                        --auto-scaling-group-names auto-scaling-static-site-asg \
-                        --query "AutoScalingGroups[0].Instances[*].InstanceId" \
+                        aws ec2 describe-instances \
+                        --instance-ids ${instanceId} \
+                        --query "Reservations[0].Instances[0].PublicIpAddress" \
                         --output text \
                         --region ap-south-1
                     """,
                     returnStdout: true
                 ).trim()
 
-                echo "ASG Instances Found: ${INSTANCES}"
+                echo "Public IP: ${PUBLIC_IP}"
+
+                if (!PUBLIC_IP || PUBLIC_IP == "None") {
+                    echo "Skipping ${instanceId} — No public IP."
+                    return
+                }
+
+                // Upload entire website folder (RECOMMENDED)
+                sh """
+                    scp -o StrictHostKeyChecking=no -i /var/lib/jenkins/keys/mykey.pem -r website/* ec2-user@${PUBLIC_IP}:/var/www/html/
+                """
+
+                echo "Deployment completed for ${instanceId}"
             }
         }
     }
-
-    // -----------------------------------------
-    // 3. DEPLOY WEBSITE FILES TO EC2 INSTANCES
-    // -----------------------------------------
-    stage('Deploy Website to EC2 Instances') {
-
-        withCredentials([
-            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
-        ]) {
-
-            script {
-
-                if (!INSTANCES?.trim()) {
-                    error "No EC2 instances found in ASG!"
-                }
-
-                def instanceList = INSTANCES.split()
-
-                instanceList.each { instanceId ->
-
-                    echo "Deploying to: ${instanceId}"
-
-                    // Get public IP of instance
-                    def PUBLIC_IP = sh(
-                        script: """
-                            aws ec2 describe-instances \
-                            --instance-ids ${instanceId} \
-                            --query "Reservations[0].Instances[0].PublicIpAddress" \
-                            --output text \
-                            --region ap-south-1
-                        """,
-                        returnStdout: true
-                    ).trim()
-
-                    echo "Public IP: ${PUBLIC_IP}"
-
-                    if (!PUBLIC_IP || PUBLIC_IP == "None") {
-                        echo "Skipping ${instanceId} — No public IP available."
-                        return
-                    }
-
-                    // Copy the website files to EC2
-                    sh """
-                        scp -o StrictHostKeyChecking=no -i /var/lib/jenkins/keys/mykey.pem index.html ec2-user@${PUBLIC_IP}:/var/www/html/
-                    """
-
-                    echo "Deployment completed for instance: ${instanceId}"
-                }
-            }
-        }
-    }
-
-    // -----------------------------------------
-    // 4. VALIDATE USING LOAD BALANCER
-    // -----------------------------------------
-    stage('Validate Behind ALB') {
-
-        withCredentials([
-            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
-        ]) {
-
-            script {
-
-                def ALB_DNS = sh(
-                    script: """
-                        aws elbv2 describe-load-balancers \
-                        --names auto-scaling-static-site-alb \
-                        --query "LoadBalancers[0].DNSName" \
-                        --output text \
-                        --region ap-south-1
-                    """,
-                    returnStdout: true
-                ).trim()
-
-                echo "ALB DNS: ${ALB_DNS}"
-
-                // Validate ALB returns HTTP 200
-                def RESPONSE = sh(
-                    script: "curl -s -o /dev/null -w \"%{http_code}\" http://${ALB_DNS}",
-                    returnStdout: true
-                ).trim()
-
-                echo "ALB Response: ${RESPONSE}"
-
-                if (RESPONSE != "200") {
-                    error "Deployment Failed! ALB returned non-200 response."
-                }
-
-                echo "SUCCESS — Website is live behind the ALB!"
-            }
-        }
-    }
-
 }
