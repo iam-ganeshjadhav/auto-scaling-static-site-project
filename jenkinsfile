@@ -1,67 +1,18 @@
-pipeline {
-    agent any
+stage('Find EC2 Instances in ASG') {
+    steps {
+        withAWS(credentials: 'awscreds', region: 'ap-south-1') {
+            script {
+                INSTANCES = sh(
+                    script: """
+                        aws autoscaling describe-auto-scaling-groups \
+                        --auto-scaling-group-names auto-scaling-static-site-asg \
+                        --query "AutoScalingGroups[0].Instances[*].InstanceId" \
+                        --output text
+                    """,
+                    returnStdout: true
+                ).trim()
 
-    environment {
-        AWS_REGION = "ap-south-1"
-        REPO_URL = "https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git"
-        ASG_NAME = "auto-scaling-static-site-asg"
-    }
-
-    triggers {
-        githubPush()
-    }
-
-    stages {
-
-        stage("Checkout Website Code") {
-            steps {
-                git branch: 'main', url: "${REPO_URL}"
-            }
-        }
-
-        stage("Find EC2 Instances in ASG") {
-            steps {
-                sh '''
-                INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
-                    --auto-scaling-group-names $ASG_NAME \
-                    --query "AutoScalingGroups[0].Instances[*].InstanceId" \
-                    --output text)
-
-                echo $INSTANCES > instances.txt
-                '''
-            }
-        }
-
-        stage("Deploy Website to EC2 Instances") {
-            steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'aws-creds', keyFileVariable: 'KEY')]) {
-                    sh '''
-                    for ID in $(cat instances.txt); do
-                        IP=$(aws ec2 describe-instances \
-                            --instance-ids $ID \
-                            --query "Reservations[0].Instances[0].PublicIpAddress" \
-                            --output text)
-
-                        rsync -avz -e "ssh -o StrictHostKeyChecking=no -i $KEY" ./ \
-                            ec2-user@$IP:/usr/share/nginx/html/
-
-                        ssh -o StrictHostKeyChecking=no -i $KEY ec2-user@$IP "sudo systemctl restart nginx"
-                    done
-                    '''
-                }
-            }
-        }
-
-        stage("Validate Behind ALB") {
-            steps {
-                sh '''
-                ALB_DNS=$(aws elbv2 describe-load-balancers \
-                    --names auto-scaling-static-site-alb \
-                    --query "LoadBalancers[0].DNSName" \
-                    --output text)
-
-                curl -I http://$ALB_DNS
-                '''
+                echo "Instances found: ${INSTANCES}"
             }
         }
     }
