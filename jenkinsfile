@@ -26,7 +26,7 @@ pipeline {
         stage('Trigger ASG Instance Refresh') {
             steps {
                 withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', 
-                                  credentialsId: 'aws-creds']]) {
+                                  credentialsId: 'awscreds']]) {
 
                     sh '''
                     echo "Starting instance refresh for ASG: $ASG_NAME"
