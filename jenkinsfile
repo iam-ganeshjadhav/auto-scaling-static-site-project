@@ -1,6 +1,11 @@
 pipeline {
     agent any
-    
+
+    environment {
+        AWS_REGION = "ap-south-1"
+        ASG_NAME   = "auto-scaling-static-site-asg"
+    }
+
     stages {
 
         stage('Checkout Website Code') {
@@ -9,28 +14,41 @@ pipeline {
             }
         }
 
-        stage('Verify Files') {
+        stage('Validate Files') {
             steps {
                 sh '''
-                echo "Website files downloaded:"
+                echo "Website files:"
                 ls -l
                 '''
             }
         }
 
-        stage('Archive Artifacts') {
+        stage('Trigger ASG Instance Refresh') {
             steps {
-                archiveArtifacts artifacts: '**/*', fingerprint: true
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', 
+                                  credentialsId: 'aws-creds']]) {
+
+                    sh '''
+                    echo "Starting instance refresh for ASG: $ASG_NAME"
+                    aws autoscaling start-instance-refresh \
+                        --auto-scaling-group-name $ASG_NAME \
+                        --region $AWS_REGION \
+                        --preferences MinHealthyPercentage=50 \
+                        --strategy Rolling
+
+                    echo "Instance refresh triggered!"
+                    '''
+                }
             }
         }
     }
 
     post {
         success {
-            echo "Pipeline successful — website code validated!"
+            echo "Website deployed successfully using ASG refresh!"
         }
         failure {
-            echo "Pipeline failed!"
+            echo "Deployment failed!"
         }
     }
 }
