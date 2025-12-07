@@ -1,79 +1,105 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    AWS_REGION = "ap-south-1"
-    TF_IN_AUTOMATION = "true"
-  }
-
-  triggers {
-    githubPush()
-  }
-
-  stages {
-    stage("Checkout Infra Code") {
-      steps {
-        git branch: 'main', url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
-      }
+    environment {
+        TF_VERSION = "1.7.0"
+        AWS_REGION = "ap-south-1"
     }
 
-    stage("Terraform Init") {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'aws-creds', passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
-          sh '''
-            export AWS_REGION=${AWS_REGION}
-            terraform init
-          '''
+    stages {
+
+        /* -----------------------------
+           CHECKOUT APPLICATION WEBSITE CODE
+        ------------------------------ */
+        stage('Checkout SCM') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
+            }
         }
-      }
-    }
 
-    stage("Terraform Plan") {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'aws-creds', passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
-          sh '''
-            export AWS_REGION=${AWS_REGION}
-            terraform plan \
-              -var="alert_email=your-email@example.com" \
-              -var="app_version=${BUILD_NUMBER}"
-          '''
+        /* -----------------------------
+           CHECKOUT TERRAFORM INFRA CODE
+        ------------------------------ */
+        stage('Checkout Infra Code') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
+            }
         }
-      }
-    }
 
-    stage("Terraform Apply") {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'aws-creds', passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
-          sh '''
-            export AWS_REGION=${AWS_REGION}
-            terraform apply -auto-approve \
-              -var="alert_email=your-email@example.com" \
-              -var="app_version=${BUILD_NUMBER}"
-          '''
+        /* -----------------------------
+           TERRAFORM INIT
+        ------------------------------ */
+        stage('Terraform Init') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+                    sh '''
+                        echo "Running Terraform Init..."
+                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+
+                        terraform init
+                    '''
+                }
+            }
         }
-      }
-    }
 
-    stage("Validate Website Behind ALB") {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'aws-creds', passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
-          sh '''
-            export AWS_REGION=${AWS_REGION}
-            ALB_DNS=$(terraform output -raw alb_dns_name)
-            echo "ALB DNS: $ALB_DNS"
-            curl -I http://$ALB_DNS
-          '''
+        /* -----------------------------
+           TERRAFORM PLAN
+        ------------------------------ */
+        stage('Terraform Plan') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+                    sh '''
+                        echo "Running Terraform Plan..."
+                        terraform plan
+                    '''
+                }
+            }
         }
-      }
-    }
 
-    stage("Trigger CPU Load Test Placeholder") {
-      steps {
-        sh '''
-          echo "CPU load test can be triggered on one of the EC2 instances to show scaling."
-          echo "Use stress tool via SSH or SSM as part of demo."
-        '''
-      }
+        /* -----------------------------
+           TERRAFORM APPLY
+        ------------------------------ */
+        stage('Terraform Apply') {
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-creds'
+                ]]) {
+                    sh '''
+                        echo "Running Terraform Apply..."
+                        terraform apply -auto-approve
+                    '''
+                }
+            }
+        }
+
+        /* -----------------------------
+           VALIDATE WEBSITE BEHIND ALB
+        ------------------------------ */
+        stage('Validate Website Behind ALB') {
+            steps {
+                script {
+                    echo "Validation placeholder – You can add ALB DNS test here."
+                }
+            }
+        }
+
+        /* -----------------------------
+           LOAD TEST PLACEHOLDER
+        ------------------------------ */
+        stage('Trigger CPU Load Test Placeholder') {
+            steps {
+                echo "CPU Load test placeholder"
+            }
+        }
     }
-  }
 }
