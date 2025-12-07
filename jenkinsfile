@@ -34,7 +34,7 @@ pipeline {
 
         stage("Deploy Website to EC2 Instances") {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'node-key', keyFileVariable: 'KEY')]) {
+                withCredentials([sshUserPrivateKey(credentialsId: 'aws-creds', keyFileVariable: 'KEY')]) {
                     sh '''
                     for ID in $(cat instances.txt); do
                         IP=$(aws ec2 describe-instances \
