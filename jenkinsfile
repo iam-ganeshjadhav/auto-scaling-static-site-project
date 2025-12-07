@@ -1,42 +1,8 @@
-node {
+stage('Deploy Website to EC2 Instances') {
 
-    // -------------------------------
-    // 1. CHECKOUT WEBSITE CODE
-    // -------------------------------
-    stage('Checkout') {
-        git branch: 'main', url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
-    }
-
-    // -------------------------------
-    // 2. FIND EC2 INSTANCES IN ASG
-    // -------------------------------
-    stage('Find EC2 Instances in ASG') {
-
-        withCredentials([
-            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
-        ]) {
-
-            script {
-                INSTANCES = sh(
-                    script: """
-                        aws autoscaling describe-auto-scaling-groups \
-                        --auto-scaling-group-names auto-scaling-static-site-asg \
-                        --query "AutoScalingGroups[0].Instances[*].InstanceId" \
-                        --output text \
-                        --region ap-south-1
-                    """,
-                    returnStdout: true
-                ).trim()
-
-                echo "ASG Instances: ${INSTANCES}"
-            }
-        }
-    }
-
-    // -------------------------------
-    // 3. DEPLOY TO EC2 INSTANCES
-    // -------------------------------
-    stage('Deploy Website to EC2 Instances') {
+    withCredentials([
+        [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
+    ]) {
 
         script {
             if (!INSTANCES?.trim()) {
@@ -49,7 +15,6 @@ node {
 
                 echo "Deploying to instance: ${instanceId}"
 
-                // Fetch Public IP
                 def PUBLIC_IP = sh(
                     script: """
                         aws ec2 describe-instances \
@@ -68,7 +33,6 @@ node {
                     return
                 }
 
-                // Copy website files
                 sh """
                     scp -o StrictHostKeyChecking=no -i /var/lib/jenkins/keys/mykey.pem index.html ec2-user@${PUBLIC_IP}:/var/www/html/
                 """
@@ -77,40 +41,4 @@ node {
             }
         }
     }
-
-    // -------------------------------
-    // 4. VALIDATE ALB
-    // -------------------------------
-    stage('Validate Behind ALB') {
-
-        script {
-            def ALB_DNS = sh(
-                script: """
-                    aws elbv2 describe-load-balancers \
-                    --names auto-scaling-static-site-alb \
-                    --query "LoadBalancers[0].DNSName" \
-                    --output text \
-                    --region ap-south-1
-                """,
-                returnStdout: true
-            ).trim()
-
-            echo "ALB DNS: ${ALB_DNS}"
-
-            // hit ALB endpoint
-            def RESPONSE = sh(
-                script: "curl -s -o /dev/null -w \"%{http_code}\" http://${ALB_DNS}",
-                returnStdout: true
-            ).trim()
-
-            echo "ALB Response Code: ${RESPONSE}"
-
-            if (RESPONSE != "200") {
-                error "ALB returned non-200 response. Deployment Failed!"
-            }
-
-            echo "ALB is serving the updated website successfully!"
-        }
-    }
-
 }
