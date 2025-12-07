@@ -1,80 +1,36 @@
-node {
+\pipeline {
+    agent any
+    
+    stages {
 
-    def INSTANCES = ""
+        stage('Checkout Website Code') {
+            steps {
+                git branch: 'main', url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
+            }
+        }
 
-    stage('Checkout') {
-        git branch: 'main',
-            url: 'https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git'
-    }
+        stage('Verify Files') {
+            steps {
+                sh '''
+                echo "Website files downloaded:"
+                ls -l
+                '''
+            }
+        }
 
-    stage('Find EC2 Instances in ASG') {
-        withCredentials([
-            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
-        ]) {
-            script {
-                INSTANCES = sh(
-                    script: """
-                        aws autoscaling describe-auto-scaling-groups \
-                        --auto-scaling-group-names auto-scaling-static-site-asg \
-                        --query "AutoScalingGroups[0].Instances[*].InstanceId" \
-                        --output text \
-                        --region ap-south-1
-                    """,
-                    returnStdout: true
-                ).trim()
-
-                echo "ASG Instances Found: ${INSTANCES}"
+        stage('Archive Artifacts') {
+            steps {
+                archiveArtifacts artifacts: '**/*', fingerprint: true
             }
         }
     }
 
-    stage('Deploy Website to EC2 Instances') {
-
-        withCredentials([
-            [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds'],
-            sshUserPrivateKey(credentialsId: 'node-key', keyFileVariable: 'SSH_KEY')
-        ]) {
-
-            script {
-
-                if (!INSTANCES?.trim()) {
-                    error "No EC2 instances found!"
-                }
-
-                def instanceList = INSTANCES.split()
-
-                instanceList.each { instanceId ->
-
-                    echo "Deploying to: ${instanceId}"
-
-                    def PUBLIC_IP = sh(
-                        script: """
-                            aws ec2 describe-instances \
-                            --instance-ids ${instanceId} \
-                            --query "Reservations[0].Instances[0].PublicIpAddress" \
-                            --output text \
-                            --region ap-south-1
-                        """,
-                        returnStdout: true
-                    ).trim()
-
-                    echo "Public IP: ${PUBLIC_IP}"
-
-                    if (!PUBLIC_IP || PUBLIC_IP == "None") {
-                        echo "Skipping ${instanceId} — No public IP"
-                        return
-                    }
-
-                    sh """
-                        scp -o StrictHostKeyChecking=no -i $SSH_KEY *.html ec2-user@${PUBLIC_IP}:/var/www/html/
-                        scp -o StrictHostKeyChecking=no -i $SSH_KEY *.css ec2-user@${PUBLIC_IP}:/var/www/html/
-                        scp -o StrictHostKeyChecking=no -i $SSH_KEY -r IMG ec2-user@${PUBLIC_IP}:/var/www/html/
-                    """
-
-                    echo "Deployment done for ${instanceId}"
-                }
-            }
+    post {
+        success {
+            echo "Pipeline successful — website code validated!"
+        }
+        failure {
+            echo "Pipeline failed!"
         }
     }
-
 }
