@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         AWS_REGION = "ap-south-1"
-        REPO_URL = "https://github.com/your-github/static-website-project.git"
+        REPO_URL = "https://github.com/iam-ganeshjadhav/auto-scaling-static-site-project.git"
         ASG_NAME = "auto-scaling-static-site-asg"
     }
 
