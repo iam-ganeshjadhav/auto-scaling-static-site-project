@@ -2,17 +2,19 @@ stage('Find EC2 Instances in ASG') {
     withCredentials([
         [$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']
     ]) {
-        INSTANCES = sh(
-            script: """
-                aws autoscaling describe-auto-scaling-groups \
-                --auto-scaling-group-names auto-scaling-static-site-asg \
-                --query "AutoScalingGroups[0].Instances[*].InstanceId" \
-                --output text \
-                --region ap-south-1
-            """,
-            returnStdout: true
-        ).trim()
+        script {
+            def INSTANCES = sh(
+                script: """
+                    aws autoscaling describe-auto-scaling-groups \
+                    --auto-scaling-group-names auto-scaling-static-site-asg \
+                    --query "AutoScalingGroups[0].Instances[*].InstanceId" \
+                    --output text \
+                    --region ap-south-1
+                """,
+                returnStdout: true
+            ).trim()
 
-        echo "Instances found: ${INSTANCES}"
+            echo "Instances found: ${INSTANCES}"
+        }
     }
 }
